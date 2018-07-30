@@ -5,17 +5,23 @@
 package io.flutter.plugin.platform;
 
 import android.annotation.TargetApi;
-import android.content.Context;
 import android.os.Build;
 import android.util.Log;
+import android.view.MotionEvent;
+import android.view.View;
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.StandardMethodCodec;
 import io.flutter.view.FlutterView;
 import io.flutter.view.TextureRegistry;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+
+import static android.view.MotionEvent.PointerCoords;
+import static android.view.MotionEvent.PointerProperties;
 
 /**
  * Manages platform views.
@@ -85,6 +91,9 @@ public class PlatformViewsController implements MethodChannel.MethodCallHandler 
                 return;
             case "resize":
                 resizePlatformView(call, result);
+                return;
+            case "touch":
+                onTouch(call, result);
                 return;
         }
         result.notImplemented();
@@ -181,6 +190,106 @@ public class PlatformViewsController implements MethodChannel.MethodCallHandler 
                 toPhysicalPixels(height)
         );
         result.success(null);
+    }
+
+    private void onTouch(MethodCall call, MethodChannel.Result result) {
+        List<Object> args = call.arguments();
+
+        float density = mFlutterView.getContext().getResources().getDisplayMetrics().density;
+
+        int id = (int) args.get(0);
+        int downTime = (int) args.get(1);
+        int eventTime = (int) args.get(2);
+        int action = (int) args.get(3);
+        int pointerCount = (int) args.get(4);
+        PointerProperties[] pointerProperties =
+                parsePointerPropertiesList(args.get(5)).toArray(new PointerProperties[pointerCount]);
+        PointerCoords[] pointerCoords =
+                parsePointerCoordsList(args.get(6), density).toArray(new PointerCoords[pointerCount]);
+
+        int metaState = (int) args.get(7);
+        int buttonState = (int) args.get(8);
+        float xPrecision = (float) (double) args.get(9);
+        float yPrecision = (float) (double) args.get(10);
+        int deviceId = (int) args.get(11);
+        int edgeFlags = (int) args.get(12);
+        int source = (int) args.get(13);
+        int flags = (int) args.get(14);
+
+        View view = vdControllers.get(id).getView();
+        if (view == null) {
+            result.error(
+                    "error",
+                    "Sending touch to an unknown view with id: " + id,
+                    null
+            );
+            return;
+        }
+
+        MotionEvent event = MotionEvent.obtain(
+                downTime,
+                eventTime,
+                action,
+                pointerCount,
+                pointerProperties,
+                pointerCoords,
+                metaState,
+                buttonState,
+                xPrecision,
+                yPrecision,
+                deviceId,
+                edgeFlags,
+                source,
+                flags
+        );
+
+        view.dispatchTouchEvent(event);
+        result.success(null);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<PointerProperties> parsePointerPropertiesList(Object rawPropertiesList) {
+        List<Object> rawProperties = (List<Object>) rawPropertiesList;
+        List<PointerProperties> pointerProperties = new ArrayList<>();
+        for (Object o : rawProperties) {
+            pointerProperties.add(parsePointerProperties(o));
+        }
+        return pointerProperties;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static PointerProperties parsePointerProperties(Object rawProperties) {
+        List<Object> propertiesList = (List<Object>) rawProperties;
+        PointerProperties properties = new MotionEvent.PointerProperties();
+        properties.id = (int) propertiesList.get(0);
+        properties.toolType = (int) propertiesList.get(1);
+        return properties;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<PointerCoords> parsePointerCoordsList(Object rawCoordsList, float density) {
+        List<Object> rawCoords = (List<Object>) rawCoordsList;
+        List<PointerCoords> pointerCoords = new ArrayList<>();
+        for (Object o : rawCoords) {
+            pointerCoords.add(parsePointerCoords(o, density));
+        }
+        return pointerCoords;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static PointerCoords parsePointerCoords(Object rawCoords, float density) {
+        List<Object> coordsList = (List<Object>) rawCoords;
+        PointerCoords coords = new MotionEvent.PointerCoords();
+        coords.orientation = (float) (double) coordsList.get(0);
+        coords.pressure = (float) (double) coordsList.get(1);
+        coords.size = (float) (double) coordsList.get(2);
+        coords.toolMajor = (float) (double) coordsList.get(3) * density;
+        coords.toolMinor = (float) (double) coordsList.get(4) * density;
+        coords.touchMajor = (float) (double) coordsList.get(5) * density;
+        coords.touchMinor = (float) (double) coordsList.get(6) * density;
+        coords.x = (float) (double) coordsList.get(7) * density;
+        coords.y = (float) (double) coordsList.get(8) * density;
+        return coords;
     }
 
     private int toPhysicalPixels(double logicalPixels) {

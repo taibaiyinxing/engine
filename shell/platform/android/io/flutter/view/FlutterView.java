@@ -429,7 +429,7 @@ public class FlutterView
             return;
         }
 
-        int pointerKind = event.getToolType(pointerIndex);
+        int pointerKind = getPointerDeviceTypeForToolType(event.getToolType(pointerIndex));
         if (pointerKind == -1) {
             return;
         }
@@ -744,6 +744,9 @@ public class FlutterView
         mTouchExplorationEnabled = mAccessibilityManager.isTouchExplorationEnabled();
         if (mAccessibilityEnabled || mTouchExplorationEnabled) {
             ensureAccessibilityEnabled();
+        }
+        if (mTouchExplorationEnabled) {
+            nativeSetAssistiveTechnologyEnabled(mNativeView.get(), true);
         }
         resetWillNotDraw();
         mAccessibilityManager.addAccessibilityStateChangeListener(this);

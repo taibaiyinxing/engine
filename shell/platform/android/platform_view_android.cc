@@ -7,13 +7,13 @@
 #include <memory>
 #include <utility>
 
+#include "flutter/fml/synchronization/waitable_event.h"
 #include "flutter/shell/common/io_manager.h"
 #include "flutter/shell/platform/android/android_external_texture_gl.h"
 #include "flutter/shell/platform/android/android_surface_gl.h"
 #include "flutter/shell/platform/android/platform_message_response_android.h"
 #include "flutter/shell/platform/android/platform_view_android_jni.h"
 #include "flutter/shell/platform/android/vsync_waiter_android.h"
-#include "lib/fxl/synchronization/waitable_event.h"
 
 namespace shell {
 
@@ -25,7 +25,7 @@ PlatformViewAndroid::PlatformViewAndroid(
     : PlatformView(delegate, std::move(task_runners)),
       java_object_(java_object),
       android_surface_(AndroidSurface::Create(use_software_rendering)) {
-  FXL_CHECK(android_surface_)
+  FML_CHECK(android_surface_)
       << "Could not create an OpenGL, Vulkan or Software surface to setup "
          "rendering.";
 }
@@ -33,7 +33,7 @@ PlatformViewAndroid::PlatformViewAndroid(
 PlatformViewAndroid::~PlatformViewAndroid() = default;
 
 void PlatformViewAndroid::NotifyCreated(
-    fxl::RefPtr<AndroidNativeWindow> native_window) {
+    fml::RefPtr<AndroidNativeWindow> native_window) {
   InstallFirstFrameCallback();
   android_surface_->SetNativeWindow(native_window);
   PlatformView::NotifyCreated();
@@ -45,7 +45,7 @@ void PlatformViewAndroid::NotifyDestroyed() {
 }
 
 void PlatformViewAndroid::NotifyChanged(const SkISize& size) {
-  fxl::AutoResetWaitableEvent latch;
+  fml::AutoResetWaitableEvent latch;
   fml::TaskRunner::RunNowOrPostTask(
       task_runners_.GetGPUTaskRunner(),  //
       [&latch, surface = android_surface_.get(), size]() {
@@ -65,28 +65,28 @@ void PlatformViewAndroid::DispatchPlatformMessage(JNIEnv* env,
   std::vector<uint8_t> message =
       std::vector<uint8_t>(message_data, message_data + java_message_position);
 
-  fxl::RefPtr<blink::PlatformMessageResponse> response;
+  fml::RefPtr<blink::PlatformMessageResponse> response;
   if (response_id) {
-    response = fxl::MakeRefCounted<PlatformMessageResponseAndroid>(
+    response = fml::MakeRefCounted<PlatformMessageResponseAndroid>(
         response_id, java_object_, task_runners_.GetPlatformTaskRunner());
   }
 
   PlatformView::DispatchPlatformMessage(
-      fxl::MakeRefCounted<blink::PlatformMessage>(
+      fml::MakeRefCounted<blink::PlatformMessage>(
           std::move(name), std::move(message), std::move(response)));
 }
 
 void PlatformViewAndroid::DispatchEmptyPlatformMessage(JNIEnv* env,
                                                        std::string name,
                                                        jint response_id) {
-  fxl::RefPtr<blink::PlatformMessageResponse> response;
+  fml::RefPtr<blink::PlatformMessageResponse> response;
   if (response_id) {
-    response = fxl::MakeRefCounted<PlatformMessageResponseAndroid>(
+    response = fml::MakeRefCounted<PlatformMessageResponseAndroid>(
         response_id, java_object_, task_runners_.GetPlatformTaskRunner());
   }
 
   PlatformView::DispatchPlatformMessage(
-      fxl::MakeRefCounted<blink::PlatformMessage>(std::move(name),
+      fml::MakeRefCounted<blink::PlatformMessage>(std::move(name),
                                                   std::move(response)));
 }
 
@@ -125,7 +125,7 @@ void PlatformViewAndroid::InvokePlatformMessageEmptyResponseCallback(
 
 // |shell::PlatformView|
 void PlatformViewAndroid::HandlePlatformMessage(
-    fxl::RefPtr<blink::PlatformMessage> message) {
+    fml::RefPtr<blink::PlatformMessage> message) {
   JNIEnv* env = fml::jni::AttachCurrentThread();
   fml::jni::ScopedJavaLocalRef<jobject> view = java_object_.get(env);
   if (view.is_null())
@@ -178,11 +178,12 @@ void PlatformViewAndroid::DispatchSemanticsAction(JNIEnv* env,
 }
 
 // |shell::PlatformView|
-void PlatformViewAndroid::UpdateSemantics(blink::SemanticsNodeUpdates update,
-                                          blink::CustomAccessibilityActionUpdates actions) {
+void PlatformViewAndroid::UpdateSemantics(
+    blink::SemanticsNodeUpdates update,
+    blink::CustomAccessibilityActionUpdates actions) {
   constexpr size_t kBytesPerNode = 36 * sizeof(int32_t);
   constexpr size_t kBytesPerChild = sizeof(int32_t);
-  constexpr size_t kBytesPerAction = 2 * sizeof(int32_t);
+  constexpr size_t kBytesPerAction = 4 * sizeof(int32_t);
 
   JNIEnv* env = fml::jni::AttachCurrentThread();
   {
@@ -196,7 +197,8 @@ void PlatformViewAndroid::UpdateSemantics(blink::SemanticsNodeUpdates update,
       num_bytes +=
           value.second.childrenInTraversalOrder.size() * kBytesPerChild;
       num_bytes += value.second.childrenInHitTestOrder.size() * kBytesPerChild;
-      num_bytes += value.second.customAccessibilityActions.size() * kBytesPerChild;
+      num_bytes +=
+          value.second.customAccessibilityActions.size() * kBytesPerChild;
     }
 
     std::vector<uint8_t> buffer(num_bytes);
@@ -271,7 +273,8 @@ void PlatformViewAndroid::UpdateSemantics(blink::SemanticsNodeUpdates update,
     // custom accessibility actions.
     size_t num_action_bytes = actions.size() * kBytesPerAction;
     std::vector<uint8_t> actions_buffer(num_action_bytes);
-    int32_t* actions_buffer_int32 = reinterpret_cast<int32_t*>(&actions_buffer[0]);
+    int32_t* actions_buffer_int32 =
+        reinterpret_cast<int32_t*>(&actions_buffer[0]);
 
     std::vector<std::string> action_strings;
     size_t actions_position = 0;
@@ -281,26 +284,39 @@ void PlatformViewAndroid::UpdateSemantics(blink::SemanticsNodeUpdates update,
       // sending.
       const blink::CustomAccessibilityAction& action = value.second;
       actions_buffer_int32[actions_position++] = action.id;
+      actions_buffer_int32[actions_position++] = action.overrideId;
       if (action.label.empty()) {
         actions_buffer_int32[actions_position++] = -1;
       } else {
         actions_buffer_int32[actions_position++] = action_strings.size();
         action_strings.push_back(action.label);
       }
+      if (action.hint.empty()) {
+        actions_buffer_int32[actions_position++] = -1;
+      } else {
+        actions_buffer_int32[actions_position++] = action_strings.size();
+        action_strings.push_back(action.hint);
+      }
     }
 
-    fml::jni::ScopedJavaLocalRef<jobject> direct_actions_buffer(
-      env, env->NewDirectByteBuffer(actions_buffer.data(), actions_buffer.size()));
+    // Calling NewDirectByteBuffer in API level 22 and below with a size of zero
+    // will cause a JNI crash.
+    if (actions_buffer.size() > 0) {
+      fml::jni::ScopedJavaLocalRef<jobject> direct_actions_buffer(
+          env, env->NewDirectByteBuffer(actions_buffer.data(),
+                                        actions_buffer.size()));
+      FlutterViewUpdateCustomAccessibilityActions(
+          env, view.obj(), direct_actions_buffer.obj(),
+          fml::jni::VectorToStringArray(env, action_strings).obj());
+    }
 
-    fml::jni::ScopedJavaLocalRef<jobject> direct_buffer(
-        env, env->NewDirectByteBuffer(buffer.data(), buffer.size()));
-
-    FlutterViewUpdateCustomAccessibilityActions(
-      env, view.obj(), direct_actions_buffer.obj(),
-      fml::jni::VectorToStringArray(env, action_strings).obj());
-    FlutterViewUpdateSemantics(
-      env, view.obj(), direct_buffer.obj(),
-      fml::jni::VectorToStringArray(env, strings).obj());
+    if (buffer.size() > 0) {
+      fml::jni::ScopedJavaLocalRef<jobject> direct_buffer(
+          env, env->NewDirectByteBuffer(buffer.data(), buffer.size()));
+      FlutterViewUpdateSemantics(
+          env, view.obj(), direct_buffer.obj(),
+          fml::jni::VectorToStringArray(env, strings).obj());
+    }
   }
 }
 
@@ -331,7 +347,7 @@ sk_sp<GrContext> PlatformViewAndroid::CreateResourceContext() const {
     resource_context = IOManager::CreateCompatibleResourceLoadingContext(
         GrBackend::kOpenGL_GrBackend);
   } else {
-    FXL_DLOG(ERROR) << "Could not make the resource context current.";
+    FML_DLOG(ERROR) << "Could not make the resource context current.";
   }
 
   return resource_context;
